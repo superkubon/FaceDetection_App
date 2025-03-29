@@ -110,7 +110,39 @@ for image_filename in os.listdir(input_dir):
 
             # Step 10: Draw the bounding box after alignment
             new_bbox = face.bbox.astype(int)
-            cv2.rectangle(aligned_face, (new_bbox[0], new_bbox[1]), (new_bbox[2], new_bbox[3]), (0, 255, 0), 2)
+
+            # Option 1: Scale the bounding box by a factor (e.g., 1.2 for 20% larger)
+            scale_factor = 1.75  # Change this value as needed (1.0 means no change)
+            width = new_bbox[2] - new_bbox[0]
+            height = new_bbox[3] - new_bbox[1]
+
+            # Calculate the new width and height based on the scale factor
+            new_width = int(width * scale_factor)
+            new_height = int(height * scale_factor)
+
+            # Calculate the new top-left and bottom-right corners to maintain the center
+            center_x = (new_bbox[0] + new_bbox[2]) // 2
+            center_y = (new_bbox[1] + new_bbox[3]) // 2
+
+            # Calculate the new bounding box coordinates
+            new_x1 = center_x - new_width // 2
+            new_y1 = center_y - new_height // 2
+            new_x2 = center_x + new_width // 2
+            new_y2 = center_y + new_height // 2
+
+            # Option 2: Add padding to the bounding box (e.g., 10 pixels)
+            padding = 10  # Change this value to control the padding
+            new_x1 = max(new_bbox[0] - padding, 0)
+            new_y1 = max(new_bbox[1] - padding, 0)
+            new_x2 = new_bbox[2] + padding
+            new_y2 = new_bbox[3] + padding
+
+            # Ensure the new bounding box is within image bounds
+            new_x2 = min(new_x2, image.shape[1])
+            new_y2 = min(new_y2, image.shape[0])
+
+            # Draw the modified bounding box
+            cv2.rectangle(aligned_face, (new_x1, new_y1), (new_x2, new_y2), (0, 255, 0), 2)
 
             # Step 11: Save the Output Images
             # Save the background-removed image (PNG)
