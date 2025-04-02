@@ -62,26 +62,44 @@ def process_images(mode=1):
             print("Error: Could not access the webcam.")
             return
 
-        print("Press 'q' to stop capturing images.")
+        print("Press Enter to capture an image, Backspace to stop, Esc to exit.")
+        capturing = False
         while True:
             ret, frame = cap.read()
             if not ret:
                 print("Error: Failed to capture frame.")
                 break
 
-            # Save the captured frame to the cam_input folder
-            timestamp = int(cv2.getTickCount())  # Use timestamp for unique filename
-            cam_image_path = os.path.join(cam_input_dir, f"frame_{timestamp}.jpg")
-            cv2.imwrite(cam_image_path, frame)
-            print(f"Captured image: {cam_image_path}")
-
-            # Process the captured image
-            process_image(cam_image_path, f"frame_{timestamp}.jpg")
-
-            # Display the webcam feed (optional)
+            # Display the webcam feed
             cv2.imshow("Webcam", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):  # Press 'q' to stop
+
+            key = cv2.waitKey(1) & 0xFF
+
+            # Capture the frame when Enter is pressed
+            if key == 13:  # Enter key is pressed
+                timestamp = int(cv2.getTickCount())  # Use timestamp for unique filename
+                cam_image_path = os.path.join(cam_input_dir, f"frame_{timestamp}.jpg")
+                cv2.imwrite(cam_image_path, frame)
+                print(f"Captured image: {cam_image_path}")
+
+                # Process the captured image
+                process_image(cam_image_path, f"frame_{timestamp}.jpg")
+                capturing = True  # Start capturing after pressing Enter
+
+            # Stop capturing when Backspace is pressed
+            if key == 8:  # Backspace key is pressed
+                print("Stopping webcam capture...")
+                capturing = False
                 break
+
+            # Exit when Esc key is pressed
+            if key == 27:  # Esc key is pressed
+                print("Exiting program...")
+                break
+
+            # Stop if no image is captured
+            if not capturing:
+                print("Waiting for 'Enter' to capture image.")
 
         cap.release()
         cv2.destroyAllWindows()
