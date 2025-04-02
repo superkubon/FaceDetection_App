@@ -4,161 +4,151 @@ import numpy as np
 import rembg
 from PIL import Image
 import io
-import tempfile
 import os
 
 # Step 1: Initialize Face Detection Model (RetinaFace)
 print("Initializing face analysis...")
 face_analyzer = insightface.app.FaceAnalysis(name='buffalo_l')
-face_analyzer.prepare(ctx_id=0)  # Use 0 for GPU, -1 for CPU
 
-# Step 2: Define Directories for Input and Output
-input_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\input\\"  # Change this to your input folder
-output_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\output\\"  # Change this to your output folder
+# Try GPU first, fallback to CPU if needed
+try:
+    face_analyzer.prepare(ctx_id=0)  # GPU
+except Exception as e:
+    print("GPU initialization failed. Switching to CPU...")
+    face_analyzer.prepare(ctx_id=-1)  # CPU fallback
 
-# Ensure output directory exists
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+# Define Directories
+input_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\input\\"
+cam_input_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\cam_input\\"
+output_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\output\\"
 
-# Step 3: Define the Face Alignment Function
+# Ensure output directories exist
+os.makedirs(input_dir, exist_ok=True)
+os.makedirs(cam_input_dir, exist_ok=True)
+os.makedirs(output_dir, exist_ok=True)
+
+# Step 2: Define the Face Alignment Function
 def align_face(image, face):
-    """
-    Aligns the face based on detected landmarks, specifically the eyes.
-    This assumes that the 'face' object contains the detected keypoints (landmarks).
-    """
-    # Get the coordinates of the eyes from the face landmarks
-    left_eye = tuple(face.kps[0].astype(int))  # Left eye (first point)
-    right_eye = tuple(face.kps[1].astype(int))  # Right eye (second point)
-
-    # Compute the center of the eyes
-    eyes_center = ((left_eye[0] + right_eye[0]) / 2, (left_eye[1] + right_eye[1]) / 2)  # Use normal division
-
-    # Convert to integers
-    eyes_center = tuple(map(int, eyes_center))  # Ensure the center is a tuple of integers
-
-    # Compute the angle between the eyes
+    left_eye = tuple(face.kps[0].astype(int))
+    right_eye = tuple(face.kps[1].astype(int))
+    eyes_center = tuple(map(int, ((left_eye[0] + right_eye[0]) / 2, (left_eye[1] + right_eye[1]) / 2)))
     dx = right_eye[0] - left_eye[0]
     dy = right_eye[1] - left_eye[1]
     angle = np.degrees(np.arctan2(dy, dx))
-
-    # Get the rotation matrix for the face alignment
     rotation_matrix = cv2.getRotationMatrix2D(eyes_center, angle, 1)
 
-    # Get the aligned face by rotating the image around the eyes center
-    aligned_face = cv2.warpAffine(image, rotation_matrix, (image.shape[1], image.shape[0]), flags=cv2.INTER_CUBIC)
+    # Convert to float for more precision during rotation
+    image_float = image.astype(np.float32)
+
+    # Use INTER_CUBIC for better quality rotation
+    aligned_face = cv2.warpAffine(image_float, rotation_matrix, (image.shape[1], image.shape[0]), flags=cv2.INTER_CUBIC)
+
+    # Convert back to uint8 (standard image format)
+    aligned_face = np.clip(aligned_face, 0, 255).astype(np.uint8)
 
     return aligned_face
 
+# Step 3: Process Images (Folder or Webcam)
+def process_images(mode=1):
+    if mode == 1:  # Process images from input folder
+        for image_filename in os.listdir(input_dir):
+            if not image_filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                continue
+            image_path = os.path.join(input_dir, image_filename)
+            process_image(image_path, image_filename)
+    elif mode == 2:  # Capture images from webcam and save them to cam_input folder
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("Error: Could not access the webcam.")
+            return
 
-# Step 4: Traverse through each image in the input directory
-for image_filename in os.listdir(input_dir):
-    image_path = os.path.join(input_dir, image_filename)
+        print("Press 'q' to stop capturing images.")
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Error: Failed to capture frame.")
+                break
+
+            # Save the captured frame to the cam_input folder
+            timestamp = int(cv2.getTickCount())  # Use timestamp for unique filename
+            cam_image_path = os.path.join(cam_input_dir, f"frame_{timestamp}.jpg")
+            cv2.imwrite(cam_image_path, frame)
+            print(f"Captured image: {cam_image_path}")
+
+            # Process the captured image
+            process_image(cam_image_path, f"frame_{timestamp}.jpg")
+
+            # Display the webcam feed (optional)
+            cv2.imshow("Webcam", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):  # Press 'q' to stop
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+# Step 4: Process each image
+def process_image(image_path, image_filename):
+    print(f"Processing image: {image_path}")
+
+    image = cv2.imread(image_path)
+    if image is None:
+        print(f"Error loading image: {image_filename}")
+        return
+
+    print(f"Image loaded successfully: {image.shape}")
     
-    # Check if the file is an image (optional filter, e.g., only .jpg, .png)
-    if image_filename.lower().endswith(('.jpg', '.png', '.jpeg')):
-        print(f"Processing image: {image_path}")
-        
-        # Step 5: Load the image
-        image = cv2.imread(image_path)
-        
-        if image is None:
-            print(f"Error: Image {image_filename} not found!")
-            continue
-        else:
-            print(f"Image loaded successfully! Image shape: {image.shape}")
+    # Step 5: Background Removal
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB for consistency with PIL
+    pil_image = Image.fromarray(image_rgb)
+    print("Removing background...")
+    output_image = rembg.remove(pil_image)
+    
+    # Use in-memory buffer instead of temp file
+    output_buffer = io.BytesIO()
+    output_image.save(output_buffer, format="PNG")
+    output_image = Image.open(io.BytesIO(output_buffer.getvalue())).convert("RGB")
 
-        # Step 6: Use rembg for Background Removal
-        print("Starting background removal using rembg...")
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert from BGR to RGB
-        pil_image = Image.fromarray(image_rgb)  # Convert to PIL image
+    # Save background-removed image
+    bg_removed_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_bg_removed.png")
+    output_image.save(bg_removed_path)
+    print(f"Background removed image saved: {bg_removed_path}")
 
-        # Use rembg to remove the background
-        output_image = rembg.remove(pil_image)
+    # Step 6: Face Detection with Bounding Box
+    output_np = np.array(output_image)
+    print("Detecting faces...")
+    faces = face_analyzer.get(output_np)
 
-        # Convert the output image to bytes using BytesIO
-        output_bytes_io = io.BytesIO()
-        output_image.save(output_bytes_io, format="PNG")
-        output_bytes = output_bytes_io.getvalue()
+    if not faces:
+        print("No faces detected.")
+        return
+    print(f"Detected {len(faces)} face(s).")
 
-        # Step 7: Save the Output of Background Removal to a Temporary File
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
-            temp_file.write(output_bytes)
-            temp_file_path = temp_file.name
-        
-        # Open the temporary file with PIL
-        output_image = Image.open(temp_file_path)
+    # Save face detection output image (just drawing bounding boxes)
+    face_detected_image = output_np.copy()
+    for face in faces:
+        bbox = face.bbox.astype(int)
+        # Draw bounding box around detected face
+        cv2.rectangle(face_detected_image, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
 
-        # Step 8: Perform Face Detection
-        print("Starting face detection...")
-        output_image_rgb = output_image.convert("RGB")  # Convert to RGB (removes alpha channel)
-        faces = face_analyzer.get(np.array(output_image_rgb))
+    # Save the image with bounding boxes
+    face_detected_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_faces_detected.jpg")
+    cv2.imwrite(face_detected_path, cv2.cvtColor(face_detected_image, cv2.COLOR_RGB2BGR))
+    print(f"Face detection with bounding box saved: {face_detected_path}")
 
-        # Debugging: Check if any faces are detected
-        if len(faces) == 0:
-            print("No faces detected in the image.")
-        else:
-            print(f"Detected {len(faces)} faces.")
+    # Step 7: Face Alignment without Bounding Box
+    for i, face in enumerate(faces):
+        aligned_face = align_face(output_np, face)
 
-        # Step 9: Draw Bounding Boxes and Landmarks on the Image
-        image_with_faces = np.array(output_image_rgb)  # Convert PIL image to numpy array for OpenCV
-        for face in faces:
-            # At this point, no bounding box is drawn during detection.
-            # Instead, we will align the face and draw the bounding box after alignment.
+        # Ensure color consistency by converting back to RGB
+        aligned_face_rgb = cv2.cvtColor(aligned_face, cv2.COLOR_BGR2RGB)
 
-            # Align face using the detected landmarks (we'll align to the eyes)
-            aligned_face = align_face(image_with_faces, face)
+        # Save aligned face without bounding box
+        aligned_face_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_aligned_face_{i}.jpg")
+        cv2.imwrite(aligned_face_path, cv2.cvtColor(aligned_face_rgb, cv2.COLOR_RGB2BGR))
+        print(f"Aligned face {i} saved: {aligned_face_path}")
 
-            # Step 10: Draw the bounding box after alignment
-            new_bbox = face.bbox.astype(int)
+print("✅ All images processed.")
 
-            # Option 1: Scale the bounding box by a factor (e.g., 1.2 for 20% larger)
-            scale_factor = 1.75  # Change this value as needed (1.0 means no change)
-            width = new_bbox[2] - new_bbox[0]
-            height = new_bbox[3] - new_bbox[1]
-
-            # Calculate the new width and height based on the scale factor
-            new_width = int(width * scale_factor)
-            new_height = int(height * scale_factor)
-
-            # Calculate the new top-left and bottom-right corners to maintain the center
-            center_x = (new_bbox[0] + new_bbox[2]) // 2
-            center_y = (new_bbox[1] + new_bbox[3]) // 2
-
-            # Calculate the new bounding box coordinates
-            new_x1 = center_x - new_width // 2
-            new_y1 = center_y - new_height // 2
-            new_x2 = center_x + new_width // 2
-            new_y2 = center_y + new_height // 2
-
-            # Option 2: Add padding to the bounding box (e.g., 10 pixels)
-            padding = 10  # Change this value to control the padding
-            new_x1 = max(new_bbox[0] - padding, 0)
-            new_y1 = max(new_bbox[1] - padding, 0)
-            new_x2 = new_bbox[2] + padding
-            new_y2 = new_bbox[3] + padding
-
-            # Ensure the new bounding box is within image bounds
-            new_x2 = min(new_x2, image.shape[1])
-            new_y2 = min(new_y2, image.shape[0])
-
-            # Draw the modified bounding box
-            cv2.rectangle(aligned_face, (new_x1, new_y1), (new_x2, new_y2), (0, 255, 0), 2)
-
-            # Step 11: Save the Output Images
-            # Save the background-removed image (PNG)
-            output_image_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_bg_removed.png")
-            output_image.save(output_image_path)
-            
-            # Save the image with detected faces and landmarks (JPEG)
-            output_detected_faces_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_faces_detected.jpg")
-            # Convert to RGB before saving as JPEG (OpenCV uses BGR)
-            image_with_faces_rgb = cv2.cvtColor(image_with_faces, cv2.COLOR_BGR2RGB)
-            cv2.imwrite(output_detected_faces_path, image_with_faces_rgb)
-
-            # Save the aligned face image (JPEG)
-            output_aligned_face_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_aligned_face.jpg")
-            cv2.imwrite(output_aligned_face_path, aligned_face)
-
-            print(f"Processed images saved:\n - Background removed: {output_image_path}\n - Detected faces: {output_detected_faces_path}\n - Aligned face: {output_aligned_face_path}")
-
-print("All images processed.")
+# Step 8: Choose Mode (1 or 2)
+mode = int(input("Enter mode (1 for folder processing, 2 for webcam processing): "))
+process_images(mode)
