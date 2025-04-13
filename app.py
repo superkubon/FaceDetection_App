@@ -21,11 +21,13 @@ except Exception as e:
 input_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\input\\"
 cam_input_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\cam_input\\"
 output_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\output\\"
+final_output_dir = "D:\\Work\\Thesis\\Face_detection\\FaceD\\final_output\\"
 
 # Ensure output directories exist
 os.makedirs(input_dir, exist_ok=True)
 os.makedirs(cam_input_dir, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
+os.makedirs(final_output_dir, exist_ok=True)
 
 # Step 2: Define the Face Alignment Function
 def align_face(image, face):
@@ -164,6 +166,35 @@ def process_image(image_path, image_filename):
         aligned_face_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_aligned_face_{i}.jpg")
         cv2.imwrite(aligned_face_path, aligned_face_rgb)
         print(f"Aligned face {i} saved: {aligned_face_path}")
+
+        # Step 8: Crop only the face region using bbox
+        # Original bounding box
+        x1, y1, x2, y2 = face.bbox.astype(int)
+
+        # Modify this factor to expand/shrink the box (1.0 = original, 1.2 = 20% bigger, 0.9 = 10% smaller)
+        bbox_scale = 1.2
+
+        # Center of the box
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
+        w = (x2 - x1) * bbox_scale
+        h = (y2 - y1) * bbox_scale
+
+        # New coordinates
+        x1_new = int(max(cx - w / 2, 0))
+        y1_new = int(max(cy - h / 2, 0))
+        x2_new = int(min(cx + w / 2, aligned_face_rgb.shape[1]))
+        y2_new = int(min(cy + h / 2, aligned_face_rgb.shape[0]))
+
+        # Crop using new bounding box
+        cropped_face = aligned_face_rgb[y1_new:y2_new, x1_new:x2_new]
+
+        # Save
+        cropped_face_path = os.path.join(final_output_dir, f"{os.path.splitext(image_filename)[0]}_aligned_face_crop_{i}.jpg")
+        cv2.imwrite(cropped_face_path, cropped_face)
+        print(f"Expanded cropped face {i} saved: {cropped_face_path}")
+
+
 
 print("✅ All images processed.")
 
