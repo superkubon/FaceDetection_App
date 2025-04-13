@@ -162,7 +162,7 @@ def process_image(image_path, image_filename):
 
         # Save aligned face without bounding box
         aligned_face_path = os.path.join(output_dir, f"{os.path.splitext(image_filename)[0]}_aligned_face_{i}.jpg")
-        cv2.imwrite(aligned_face_path, cv2.cvtColor(aligned_face_rgb, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(aligned_face_path, aligned_face_rgb)
         print(f"Aligned face {i} saved: {aligned_face_path}")
 
 print("✅ All images processed.")
